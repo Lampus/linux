@@ -84,6 +84,7 @@ struct spi_device {
 #define	SPI_LOOP	0x20			/* loopback mode */
 #define	SPI_NO_CS	0x40			/* 1 dev/bus, no chipselect */
 #define	SPI_READY	0x80			/* slave pulls low to pause */
+#define SPI_CSDEC	0x100			/* Yep, I don't know why it's here */
 	u8			bits_per_word;
 	int			irq;
 	void			*controller_state;
@@ -267,6 +268,7 @@ struct spi_master {
 #define SPI_MASTER_HALF_DUPLEX	BIT(0)		/* can't do full duplex */
 #define SPI_MASTER_NO_RX	BIT(1)		/* can't do buffer read */
 #define SPI_MASTER_NO_TX	BIT(2)		/* can't do buffer write */
+#define SPI_MASTER_CS_DEC	BIT(3)		/* chip-select decoding can be used */
 
 	/* lock and mutex for SPI bus locking */
 	spinlock_t		bus_lock_spinlock;
@@ -274,6 +276,7 @@ struct spi_master {
 
 	/* flag indicating that the SPI bus is locked for exclusive use */
 	bool			bus_lock_flag;
+	bool			cs_dec_flag;
 
 	/* Setup mode and clock, etc (spi driver may call many times).
 	 *

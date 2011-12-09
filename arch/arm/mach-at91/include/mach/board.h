@@ -125,6 +125,7 @@ extern void __init at91_add_device_i2c(struct i2c_board_info *devices, int nr_de
 
  /* SPI */
 extern void __init at91_add_device_spi(struct spi_board_info *devices, int nr_devices);
+extern void __init at91_set_spi_cs_dec(int master_num, bool tf);
 
  /* Serial */
 #define ATMEL_UART_CTS	0x01

@@ -22,6 +22,7 @@
 #include <mach/at91sam9260.h>
 #include <mach/at91sam9260_matrix.h>
 #include <mach/at91sam9_smc.h>
+#include <linux/spi/spi_gpio.h>
 
 #include "generic.h"
 
@@ -520,6 +521,7 @@ void __init at91_add_device_i2c(struct i2c_board_info *devices, int nr_devices) 
 
 #if defined(CONFIG_SPI_ATMEL) || defined(CONFIG_SPI_ATMEL_MODULE)
 static u64 spi_dmamask = DMA_BIT_MASK(32);
+static bool cs_dec_flag[2] = { false, false };
 
 static struct resource spi0_resources[] = {
 	[0] = {
@@ -571,7 +573,31 @@ static struct platform_device at91sam9260_spi1_device = {
 	.num_resources	= ARRAY_SIZE(spi1_resources),
 };
 
-static const unsigned spi1_standard_cs[4] = { AT91_PIN_PB3, AT91_PIN_PC5, AT91_PIN_PC4, AT91_PIN_PC3 };
+//static const unsigned spi1_standard_cs[4] = { AT91_PIN_PB3, AT91_PIN_PC5, AT91_PIN_PC4, AT91_PIN_PC3 };
+static const unsigned spi1_standard_cs[4] = { AT91_PIN_PB3, AT91_PIN_PA25, AT91_PIN_PA26, AT91_PIN_PA27 };
+
+void __init at91_set_spi_cs_dec(int master_num, bool tf)
+{
+	cs_dec_flag[master_num] = tf;
+	if(master_num == 0)
+		at91sam9260_spi0_device.dev.platform_data=(void *)tf;
+	else
+		at91sam9260_spi1_device.dev.platform_data=(void *)tf;
+}
+
+void __init configure_spi_cs_pins(unsigned short bus_num, unsigned short max_cs_num)
+{
+	int i;
+
+	for(i=0; (1<<i)<max_cs_num+1; i++)
+	{
+		/* enable chip-select pin */
+		if(bus_num == 0)
+			at91_set_gpio_output(spi0_standard_cs[i], 1);
+		else
+			at91_set_gpio_output(spi1_standard_cs[i], 1);
+	}
+}
 
 void __init at91_add_device_spi(struct spi_board_info *devices, int nr_devices)
 {
@@ -579,32 +605,43 @@ void __init at91_add_device_spi(struct spi_board_info *devices, int nr_devices)
 	unsigned long cs_pin;
 	short enable_spi0 = 0;
 	short enable_spi1 = 0;
+	unsigned short max_cs_num[2] = { 0, 0 };
 
 	/* Choose SPI chip-selects */
 	for (i = 0; i < nr_devices; i++) {
-		if (devices[i].controller_data)
-			cs_pin = (unsigned long) devices[i].controller_data;
-		else if (devices[i].bus_num == 0)
-			cs_pin = spi0_standard_cs[devices[i].chip_select];
-		else
-			cs_pin = spi1_standard_cs[devices[i].chip_select];
+		if(max_cs_num[devices[i].bus_num] < devices[i].chip_select)
+			max_cs_num[devices[i].bus_num] = devices[i].chip_select;
 
 		if (devices[i].bus_num == 0)
 			enable_spi0 = 1;
 		else
 			enable_spi1 = 1;
 
-		/* enable chip-select pin */
-		at91_set_gpio_output(cs_pin, 1);
+		if(!cs_dec_flag[devices[i].bus_num]) {
+			if (devices[i].controller_data)
+				cs_pin = (unsigned long) devices[i].controller_data;
+			else if (devices[i].bus_num == 0)
+				cs_pin = spi0_standard_cs[devices[i].chip_select];
+			else
+				cs_pin = spi1_standard_cs[devices[i].chip_select];
 
-		/* pass chip-select pin to driver */
-		devices[i].controller_data = (void *) cs_pin;
+			/* pass chip-select pin to driver */
+			devices[i].controller_data = (void *) cs_pin;
+			at91_set_gpio_output(cs_pin, 1);
+		}
+		else {
+			if(devices[i].bus_num == 0)
+				devices[i].controller_data = (void *)spi0_standard_cs;
+			else
+				devices[i].controller_data = (void *)spi1_standard_cs;
+		}
 	}
 
 	spi_register_board_info(devices, nr_devices);
 
 	/* Configure SPI bus(es) */
 	if (enable_spi0) {
+		configure_spi_cs_pins(0, max_cs_num[0]);
 		at91_set_A_periph(AT91_PIN_PA0, 0);	/* SPI0_MISO */
 		at91_set_A_periph(AT91_PIN_PA1, 0);	/* SPI0_MOSI */
 		at91_set_A_periph(AT91_PIN_PA2, 0);	/* SPI1_SPCK */
@@ -613,6 +650,7 @@ void __init at91_add_device_spi(struct spi_board_info *devices, int nr_devices)
 		platform_device_register(&at91sam9260_spi0_device);
 	}
 	if (enable_spi1) {
+		configure_spi_cs_pins(1, max_cs_num[1]);
 		at91_set_A_periph(AT91_PIN_PB0, 0);	/* SPI1_MISO */
 		at91_set_A_periph(AT91_PIN_PB1, 0);	/* SPI1_MOSI */
 		at91_set_A_periph(AT91_PIN_PB2, 0);	/* SPI1_SPCK */
@@ -620,6 +658,29 @@ void __init at91_add_device_spi(struct spi_board_info *devices, int nr_devices)
 		at91_clock_associate("spi1_clk", &at91sam9260_spi1_device.dev, "spi_clk");
 		platform_device_register(&at91sam9260_spi1_device);
 	}
+}
+#elif defined(CONFIG_SPI_GPIO) || defined(CONFIG_SPI_GPIO_MODULE)
+struct spi_gpio_platform_data spi0_bitbang = {
+	.sck = AT91_PIN_PB2,
+	.mosi = AT91_PIN_PB1,
+	.miso = AT91_PIN_PB0,
+	.num_chipselect = 2
+};
+
+static struct platform_device spi0_gpio_device = {
+	.name		= "spi_gpio",
+	.id = 0,
+	.dev		= {
+				.platform_data = &spi0_bitbang,
+	},
+};
+
+void __init at91_add_device_spi(struct spi_board_info *devices, int nr_devices)
+{
+	printk(KERN_INFO"REGISTER SPI GPIO, NUM OF DEVS:%d\n", nr_devices);
+	at91_set_deglitch(AT91_PIN_PB0, 0);
+	spi_register_board_info(devices, nr_devices);
+	platform_device_register(&spi0_gpio_device);
 }
 #else
 void __init at91_add_device_spi(struct spi_board_info *devices, int nr_devices) {}

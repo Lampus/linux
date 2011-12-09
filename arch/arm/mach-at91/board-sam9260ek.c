@@ -26,6 +26,7 @@
 #include <linux/platform_device.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/at73c213.h>
+#include <linux/spi/tlv320aic23b.h>
 #include <linux/clk.h>
 #include <linux/i2c/at24.h>
 #include <linux/gpio_keys.h>
@@ -52,11 +53,13 @@
 static void __init ek_map_io(void)
 {
 	/* Initialize processor: 18.432 MHz crystal */
-	at91sam9260_initialize(18432000);
+	//at91sam9260_initialize(18432000);
+	at91sam9260_initialize(12000000);
 
 	/* DBGU on ttyS0. (Rx & Tx only) */
 	at91_register_uart(0, 0, 0);
 
+#if 0
 	/* USART0 on ttyS1. (Rx, Tx, CTS, RTS, DTR, DSR, DCD, RI) */
 	at91_register_uart(AT91SAM9260_ID_US0, 1, ATMEL_UART_CTS | ATMEL_UART_RTS
 			   | ATMEL_UART_DTR | ATMEL_UART_DSR | ATMEL_UART_DCD
@@ -64,7 +67,7 @@ static void __init ek_map_io(void)
 
 	/* USART1 on ttyS2. (Rx, Tx, RTS, CTS) */
 	at91_register_uart(AT91SAM9260_ID_US1, 2, ATMEL_UART_CTS | ATMEL_UART_RTS);
-
+#endif
 	/* set serial console to ttyS0 (ie, DBGU) */
 	at91_set_serial_console(0);
 }
@@ -94,6 +97,30 @@ static struct at91_udc_data __initdata ek_udc_data = {
 /*
  * Audio
  */
+
+ static struct tlv320aic23b_board_info tlv320aic23b_data = {
+	.ssc_id		= 0,
+	.shortname	= "AT91SAM9260 external CODEC",
+};
+
+static void __init tlv320aic23b_set_clk(struct tlv320aic23b_board_info *info){
+	struct clk *pck0;
+	struct clk *plla;
+
+	pck0 = clk_get(NULL, "pck0");
+	plla = clk_get(NULL, "pllb");
+
+	//  MCK Clock
+	at91_set_B_periph(AT91_PIN_PC1, 0);	// PCK0
+
+	clk_set_parent(pck0, plla);
+	clk_set_rate(pck0, 12000000);
+	clk_enable(pck0);
+
+	info->dac_clk = pck0;
+
+}
+
 static struct at73c213_board_info at73c213_data = {
 	.ssc_id		= 0,
 	.shortname	= "AT91SAM9260-EK external DAC",
@@ -123,7 +150,104 @@ static void __init at73c213_set_clk(struct at73c213_board_info *info) {}
 /*
  * SPI devices.
  */
+
 static struct spi_board_info ek_spi_devices[] = {
+/*
+	{	// LED SPI
+		.modalias	= "spi_led",
+		.chip_select	= 1,
+		.max_speed_hz	= 15 * 1000 * 1000,
+		.mode 			= SPI_MODE_0,
+		.bus_num		= 1,
+	},
+	{	// spidev
+		.modalias	= "spidev",
+		.chip_select	= 1,
+		.max_speed_hz	= 15 * 1000 * 1000,
+		.mode 			= SPI_MODE_0,
+		.bus_num		= 1,
+	},
+	{	// spidev
+		.modalias	= "spidev",
+		.chip_select	= 2,
+		.max_speed_hz	= 15 * 1000 * 1000,
+		.mode 			= SPI_MODE_0,
+		.bus_num		= 1,
+	},
+	{	// spidev
+		.modalias	= "spidev",
+		.chip_select	= 3,
+		.max_speed_hz	= 15 * 1000 * 1000,
+		.mode 			= SPI_MODE_0,
+		.bus_num		= 1,
+	},
+	{	// spidev
+		.modalias	= "spidev",
+		.chip_select	= 4,
+		.max_speed_hz	= 15 * 1000 * 1000,
+		.mode 			= SPI_MODE_0,
+		.bus_num		= 1,
+	},
+	{	// spidev
+		.modalias	= "spidev",
+		.chip_select	= 6,
+		.max_speed_hz	= 15 * 1000 * 1000,
+		.mode 			= SPI_MODE_0,
+		.bus_num		= 1,
+	},
+	{	// spidev
+		.modalias	= "spidev",
+		.chip_select	= 8,
+		.max_speed_hz	= 15 * 1000 * 1000,
+		.mode 			= SPI_MODE_0,
+		.bus_num		= 1,
+	},
+	{	// spidev
+		.modalias	= "spidev",
+		.chip_select	= 10,
+		.max_speed_hz	= 15 * 1000 * 1000,
+		.mode 			= SPI_MODE_0,
+		.bus_num		= 1,
+	},
+	{	// spidev
+		.modalias	= "spidev",
+		.chip_select	= 12,
+		.max_speed_hz	= 15 * 1000 * 1000,
+		.mode 			= SPI_MODE_0,
+		.bus_num		= 1,
+	},
+	{	// i2c-sc18is600
+		.modalias	= "i2c-sc18is600",
+		.chip_select	= 14,
+		.max_speed_hz	= 5 * 1000 * 1000,
+		.mode 			= SPI_MODE_0,
+		.bus_num		= 1,
+	},
+*/
+	{	// spidev
+		.modalias	= "ad_dpot",
+		.chip_select	= 1,
+		.max_speed_hz	= 2 * 1000 * 1000,
+		.mode 			= SPI_MODE_0,
+		.bus_num		= 1,
+		.platform_data		= (void *)"ad8400",
+		.controller_data	= (void *)AT91_PIN_PA25
+	},
+	{	// i2c-sc18is600
+		.modalias	= "i2c-sc18is600",
+		.chip_select	= 2,
+		.max_speed_hz	= 500 * 1000,
+		.mode 			= SPI_MODE_3,
+		.bus_num		= 1,
+		.controller_data	= (void *)AT91_PIN_PA26
+	},
+	{	// spidev
+		.modalias	= "spidev",
+		.chip_select	= 3,
+		.max_speed_hz	= 1 * 1000 * 1000,
+		.mode 			= SPI_MODE_0,
+		.bus_num		= 1,
+	},
 #if !defined(CONFIG_MMC_AT91)
 	{	/* DataFlash chip */
 		.modalias	= "mtd_dataflash",
@@ -150,14 +274,42 @@ static struct spi_board_info ek_spi_devices[] = {
 		.platform_data	= &at73c213_data,
 	},
 #endif
+	{	/* tlv320aic23b CODEC */
+		.modalias	= "tlv320aic23b",
+		.chip_select	= 0,
+		.max_speed_hz	= 10 * 1000 * 1000,
+		.bus_num	= 1,
+		.mode		= SPI_MODE_1,
+		.platform_data	= &tlv320aic23b_data,
+	},
 };
-
+/*
+static struct spi_board_info ek_spi_devices[] = {
+	{	// spidev
+		.modalias	= "ad_dpot",
+		.chip_select	= 0,
+		.max_speed_hz	= 500 * 1000,
+		.mode 			= SPI_MODE_0,
+		.bus_num		= 0,
+		.platform_data		= (void *)"ad8400",
+		.controller_data	= (void *)AT91_PIN_PA25,
+	},
+	{	// i2c-sc18is600
+		.modalias	= "i2c-sc18is600",
+		.chip_select	= 1,
+		.max_speed_hz	= 500 * 1000,
+		.mode 			= SPI_MODE_3,
+		.bus_num		= 0,
+		.controller_data	= (void *)AT91_PIN_PA26,
+	},
+};
+*/
 
 /*
  * MACB Ethernet device
  */
 static struct at91_eth_data __initdata ek_macb_data = {
-	.phy_irq_pin	= AT91_PIN_PA7,
+	.phy_irq_pin	= AT91_PIN_PA5,
 	.is_rmii	= 1,
 };
 
@@ -167,12 +319,12 @@ static struct at91_eth_data __initdata ek_macb_data = {
  */
 static struct mtd_partition __initdata ek_nand_partition[] = {
 	{
-		.name	= "Partition 1",
+		.name	= "Boot",
 		.offset	= 0,
-		.size	= SZ_256K,
+		.size	= SZ_8M,
 	},
 	{
-		.name	= "Partition 2",
+		.name	= "RootFS",
 		.offset	= MTDPART_OFS_NXTBLK,
 		.size	= MTDPART_SIZ_FULL,
 	},
@@ -235,9 +387,9 @@ static void __init ek_add_device_nand(void)
  * MCI (SD/MMC)
  */
 static struct at91_mmc_data __initdata ek_mmc_data = {
-	.slot_b		= 1,
+	.slot_b		= 0,
 	.wire4		= 1,
-//	.det_pin	= ... not connected
+	.det_pin	= AT91_PIN_PA4,
 //	.wp_pin		= ... not connected
 //	.vcc_pin	= ... not connected
 };
@@ -274,6 +426,11 @@ static struct i2c_board_info __initdata ek_i2c_devices[] = {
 		I2C_BOARD_INFO("24c512", 0x50),
 		.platform_data = &at24c512,
 	},
+	/*
+	{
+		I2C_BOARD_INFO("cdce913", 0x65),
+	},
+	*/
 	/* more devices can be added using expansion connectors */
 };
 
@@ -336,6 +493,7 @@ static void __init ek_board_init(void)
 	/* USB Device */
 	at91_add_device_udc(&ek_udc_data);
 	/* SPI */
+	//at91_set_spi_cs_dec(1, false);
 	at91_add_device_spi(ek_spi_devices, ARRAY_SIZE(ek_spi_devices));
 	/* NAND */
 	ek_add_device_nand();
@@ -346,12 +504,15 @@ static void __init ek_board_init(void)
 	/* I2C */
 	at91_add_device_i2c(ek_i2c_devices, ARRAY_SIZE(ek_i2c_devices));
 	/* SSC (to AT73C213) */
-	at73c213_set_clk(&at73c213_data);
+	//at73c213_set_clk(&at73c213_data);
+	tlv320aic23b_set_clk(&tlv320aic23b_data);
 	at91_add_device_ssc(AT91SAM9260_ID_SSC, ATMEL_SSC_TX);
 	/* LEDs */
+#if 0
 	at91_gpio_leds(ek_leds, ARRAY_SIZE(ek_leds));
 	/* Push Buttons */
 	ek_add_device_buttons();
+#endif
 }
 
 MACHINE_START(AT91SAM9260EK, "Atmel AT91SAM9260-EK")

@@ -34,5 +34,11 @@ config SND_AT73C213_TARGET_BITRATE
 
 	  Set to 48000 Hz by default.
 
+config SND_TLV320AIC23B
+	tristate "TI tlv320aic23b driver"
+	depends on ATMEL_SSC
+	help
+	  Texas codec
+
 endif	# SND_SPI
 

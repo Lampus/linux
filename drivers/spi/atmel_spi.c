@@ -27,6 +27,9 @@
 
 #include "atmel_spi.h"
 
+#define DEBUG
+#define VERBOSE_DEBUG
+
 /*
  * The core SPI transfer engine just talks to a register bank to set up
  * DMA transfers; transfer queue progress is driven by IRQs.  The clock
@@ -108,6 +111,8 @@ static void cs_activate(struct atmel_spi *as, struct spi_device *spi)
 	struct atmel_spi_device *asd = spi->controller_state;
 	unsigned active = spi->mode & SPI_CS_HIGH;
 	u32 mr;
+	u8 i;
+	unsigned * gpio_arr;
 
 	if (atmel_spi_is_v2()) {
 		/*
@@ -119,7 +124,23 @@ static void cs_activate(struct atmel_spi *as, struct spi_device *spi)
 		spi_writel(as, MR, SPI_BF(PCS, 0x0e) | SPI_BIT(MODFDIS)
 				| SPI_BIT(MSTR));
 		mr = spi_readl(as, MR);
-		gpio_set_value(asd->npcs_pin, active);
+		if(spi->master->cs_dec_flag) {
+			gpio_arr = (unsigned *)spi->controller_data;
+			for(i=0; i<4; i++)
+			{
+				//printk(KERN_INFO"CSDec enabled\n");
+				if((spi->chip_select>>i)&0x0001) {
+					printk(KERN_INFO"CS act pin: %d\n", i);
+					gpio_set_value(gpio_arr[i], active);
+				}
+				else {
+					printk(KERN_INFO"CS deact pin: %d\n", i);
+					gpio_set_value(gpio_arr[i], !active);
+				}
+			}
+		}
+		else
+			gpio_set_value(asd->npcs_pin, active);
 	} else {
 		u32 cpol = (spi->mode & SPI_CPOL) ? SPI_BIT(CPOL) : 0;
 		int i;
@@ -150,6 +171,8 @@ static void cs_deactivate(struct atmel_spi *as, struct spi_device *spi)
 	struct atmel_spi_device *asd = spi->controller_state;
 	unsigned active = spi->mode & SPI_CS_HIGH;
 	u32 mr;
+	int i;
+	unsigned * gpio_arr;
 
 	/* only deactivate *this* device; sometimes transfers to
 	 * another device may be active when this routine is called.
@@ -164,8 +187,15 @@ static void cs_deactivate(struct atmel_spi *as, struct spi_device *spi)
 			asd->npcs_pin, active ? " (low)" : "",
 			mr);
 
-	if (atmel_spi_is_v2() || spi->chip_select != 0)
-		gpio_set_value(asd->npcs_pin, !active);
+	if (atmel_spi_is_v2() || spi->chip_select != 0) {
+		if(spi->master->cs_dec_flag) {
+			gpio_arr = (unsigned *)spi->controller_data;
+			for(i=0; i<4; i++)
+				gpio_set_value(gpio_arr[i], !active);
+		}
+		else
+			gpio_set_value(asd->npcs_pin, !active);
+	}
 }
 
 static inline int atmel_spi_xfer_is_last(struct spi_message *msg,
@@ -543,7 +573,9 @@ static int atmel_spi_setup(struct spi_device *spi)
 	unsigned int		bits = spi->bits_per_word;
 	unsigned long		bus_hz;
 	unsigned int		npcs_pin;
+	unsigned int 		*gpio_arr;
 	int			ret;
+	int i;
 
 	as = spi_master_get_devdata(spi->master);
 
@@ -614,22 +646,38 @@ static int atmel_spi_setup(struct spi_device *spi)
 	csr |= SPI_BF(DLYBCT, 0);
 
 	/* chipselect must have been muxed as GPIO (e.g. in board setup) */
-	npcs_pin = (unsigned int)spi->controller_data;
 	asd = spi->controller_state;
 	if (!asd) {
 		asd = kzalloc(sizeof(struct atmel_spi_device), GFP_KERNEL);
 		if (!asd)
 			return -ENOMEM;
 
-		ret = gpio_request(npcs_pin, dev_name(&spi->dev));
-		if (ret) {
-			kfree(asd);
-			return ret;
+		if(spi->master->cs_dec_flag) {
+			// If chip-select decoding used we must ignore -EBUSY error
+			// from gpio_request().
+			gpio_arr = (unsigned int *)spi->controller_data;
+			for(i=0; i < 4; i++) {
+				ret = gpio_request(gpio_arr[i], dev_name(&spi->dev));
+				if (ret && ret != -EBUSY) {
+					printk(KERN_INFO "Shit happens... gpio_request() failed!\n");
+					kfree(asd);
+					return ret;
+				}
+				gpio_direction_output(gpio_arr[i], !(spi->mode & SPI_CS_HIGH));
+			}
+		}
+		else {
+			npcs_pin = (unsigned int)spi->controller_data;
+			ret = gpio_request(npcs_pin, dev_name(&spi->dev));
+			if (ret) {
+				kfree(asd);
+				return ret;
+			}
+			asd->npcs_pin = npcs_pin;
+			gpio_direction_output(npcs_pin, !(spi->mode & SPI_CS_HIGH));
 		}
 
-		asd->npcs_pin = npcs_pin;
 		spi->controller_state = asd;
-		gpio_direction_output(npcs_pin, !(spi->mode & SPI_CS_HIGH));
 	} else {
 		unsigned long		flags;
 
@@ -735,7 +783,9 @@ static void atmel_spi_cleanup(struct spi_device *spi)
 	struct atmel_spi	*as = spi_master_get_devdata(spi->master);
 	struct atmel_spi_device	*asd = spi->controller_state;
 	unsigned		gpio = (unsigned) spi->controller_data;
+	unsigned		*gpio_arr = (unsigned *) spi->controller_data;
 	unsigned long		flags;
+	int i;
 
 	if (!asd)
 		return;
@@ -748,7 +798,12 @@ static void atmel_spi_cleanup(struct spi_device *spi)
 	spin_unlock_irqrestore(&as->lock, flags);
 
 	spi->controller_state = NULL;
-	gpio_free(gpio);
+	if(spi->master->cs_dec_flag) {
+		for(i = 0; i < 4; i++)
+			gpio_free(gpio_arr[i]);
+	}
+	else
+		gpio_free(gpio);
 	kfree(asd);
 }
 
@@ -784,8 +839,13 @@ static int __init atmel_spi_probe(struct platform_device *pdev)
 	/* the spi->mode bits understood by this driver: */
 	master->mode_bits = SPI_CPOL | SPI_CPHA | SPI_CS_HIGH;
 
+	master->flags = SPI_MASTER_CS_DEC;
 	master->bus_num = pdev->id;
-	master->num_chipselect = 4;
+	master->cs_dec_flag = pdev->dev.platform_data;
+	if(master->cs_dec_flag)
+		master->num_chipselect = 16;
+	else
+		master->num_chipselect = 4;
 	master->setup = atmel_spi_setup;
 	master->transfer = atmel_spi_transfer;
 	master->cleanup = atmel_spi_cleanup;
